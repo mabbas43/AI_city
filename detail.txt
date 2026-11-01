@@ -1,0 +1,514 @@
+================================================================================
+                        AI CITY: THE LIVING WORLD
+                         Complete Project Details
+================================================================================
+
+Version      : 0.1.0 (package "ai-city-the-living-world", private)
+Author       : Abbas
+Repository   : git, branch "master" (main branch "main")
+               First commit 0e5cf5a (2026-10-22) "Build AI City: The Living World"
+Type         : Single-player browser city-management / life-simulation game
+Size         : ~10,400 lines of TypeScript/TSX/CSS (src + tests)
+Tests        : 11 Vitest suites, 117 tests, all passing
+
+
+--------------------------------------------------------------------------------
+1. OVERVIEW
+--------------------------------------------------------------------------------
+
+AI City puts you in charge of a small futuristic city as its mayor. You do not
+control the citizens directly. Each one is an autonomous agent with needs,
+personality traits, skills, goals, memories and friendships. Each decides
+for itself, minute by minute, whether to work, rest, eat, shop, socialise,
+look for a job, get medical care or protest.
+
+You shape the city indirectly through:
+  - Construction: roads, housing, businesses, energy and public services
+  - Economic policy: income tax, sales tax, unemployment benefit, energy
+    conservation
+  - Business subsidies and bailouts
+  - Petitions: decisions citizens put to you, each with clear costs
+
+The goal is to stay in office. Every 7 in-game days the citizens vote, and if
+your approval rating is below your difficulty's threshold, you lose.
+
+Design principles that run through the code:
+  - The simulation is deterministic: seeded RNG, fixed timestep, pure
+    TypeScript with no DOM.
+  - Money is conserved: every credit moves through one ledgered transfer
+    function.
+  - Every event has a cause: events fire only from explicit state conditions
+    and record the values that triggered them.
+  - Everything can be explained: happiness, approval and citizen decisions
+    are itemised and shown in the UI.
+
+
+--------------------------------------------------------------------------------
+2. TECHNOLOGY STACK
+--------------------------------------------------------------------------------
+
+Runtime dependencies
+  - phaser      ^3.90.0   2D renderer for the city map (WebGL/Canvas)
+  - react       ^19.3.1   UI panels, overlays, modals
+  - react-dom   ^19.3.1
+
+Development dependencies
+  - typescript          ^5.9.3   strict mode, ES2022 target, bundler resolution
+  - vite                ^8.3.5   dev server and production bundler
+  - @vitejs/plugin-react ^6.1.2
+  - vitest              ^5.0.5   unit and simulation tests (node environment)
+  - @types/node, @types/react, @types/react-dom
+
+Fonts: Inter and JetBrains Mono, loaded from Google Fonts in index.html.
+
+TypeScript settings (tsconfig.json): strict, noUnusedLocals,
+noUnusedParameters, noFallthroughCasesInSwitch, isolatedModules,
+jsx = react-jsx, includes src, tests and vite.config.ts.
+
+Vite settings (vite.config.ts): React plugin, chunkSizeWarningLimit 2000
+(Phaser is large), tests matched by tests/**/*.test.ts.
+
+
+--------------------------------------------------------------------------------
+3. HOW TO RUN
+--------------------------------------------------------------------------------
+
+  npm install          Install dependencies
+  npm run dev          Start the Vite dev server -> http://localhost:5173
+  npm test             Run all Vitest suites once
+  npm run test:watch   Run Vitest in watch mode
+  npm run typecheck    tsc --noEmit
+  npm run build        Typecheck, then build a production bundle into dist/
+  npm run preview      Serve the production build
+
+In development builds the game controller is exposed as window.__city in the
+browser console for debugging.
+
+
+--------------------------------------------------------------------------------
+4. GAMEPLAY
+--------------------------------------------------------------------------------
+
+4.1 Starting a game
+  A "Welcome, Mayor" modal lets you pick a difficulty and an optional seed
+  (the same seed gives the same city), then "Found the city".
+
+  Difficulty    Starting treasury    Re-election needs
+  ----------    -----------------    -----------------
+  Relaxed       9,000 cr             30% approval
+  Standard      6,000 cr             40% approval
+  Hard          3,500 cr             50% approval
+
+  The starting city is a 40 x 26 tile map with 20 citizens, 14 of them
+  employed, and this layout:
+    - West residential: 4 Houses and 1 Apartment Tower
+    - Civic centre: Park, City Hall, Clinic
+    - Commercial: Office, Shop, Market Hall
+    - Industry and energy: Fabricator (factory), Fusion Plant
+  Essential services are staffed first. Remaining workers are spread
+  round-robin across businesses, and each job goes to the best-skilled
+  candidate.
+
+4.2 Time
+  - 1 tick = 5 in-game minutes. 12 ticks = 1 hour, 288 ticks = 1 day.
+  - The game starts on Day 1 (a Monday) at 06:00.
+  - Base step 125 ms of real time per tick at 1x speed. Speeds: 1x, 2x, 4x, 8x.
+  - A fixed-step clock with a catch-up cap makes simulation speed independent
+    of frame rate. The renderer interpolates movement between ticks.
+  - Work hours are 07:00-19:00 with an 8-hour shift. Offices and fabricators
+    close at weekends. Shops, services and the power plant keep running, and
+    citizens shop and socialise more at weekends.
+
+4.3 Elections and approval
+  An election is held every 7 days (TERM_DAYS). Approval moves 12% of the way
+  toward a target value each hour. The target is the sum of these itemised
+  factors:
+    Baseline 50
+    Citizen mood            (avg happiness - 60) x 0.9
+    Unemployment > 5%       -(rate - 0.05) x 70
+    Homeless                -3 each (max -15)
+    Blackouts               -8
+    Closed businesses       -3 each (max -9)
+    Protest at City Hall    -10
+    Budget crisis           -6
+    High income tax (>15%)  -(rate - 0.15) x 60
+    Low income tax (<10%)   +(0.10 - rate) x 30
+    High sales tax (>10%)   -(rate - 0.10) x 40
+    Generous benefits       +2 (benefit >= 15 and some unemployed)
+    Working clinic          +2   / no working clinic -5
+    Plenty of parks         +2 (1 park per 15 citizens)
+    Public school           +2
+    Temporary modifiers from petitions and promises
+  - Win: your term number rises and you receive a grant of
+    500 + 25 x population credits.
+  - Lose: game over. You can start a new city or keep playing in sandbox
+    mode, which has no more elections.
+
+4.4 Petitions (decisions put to the mayor)
+  Up to 2 petitions can be open at once. None appear during the first hours
+  of a new city. If you don't answer before a petition expires, its default
+  option applies. The game can auto-pause while a petition is waiting; this
+  is a toggle under the event log.
+
+  Petition            Trigger                     Options
+  -----------------   -------------------------   ------------------------------
+  Bailout             Business distressed 3+ h    Pay 400 cr (+3 approval for a
+                                                  day) / let it close
+  Emergency power     Sustained power shortage    Buy 250 cr: +25 supply for
+                                                  24 h / decline
+  Street festival     Weekend 09-13, pop >= 10,   Sponsor 300 cr: +6 mood until
+                      happiness >= 45, no storm   23:00, +4 approval for 2 days /
+                                                  skip
+  Tax relief          Income tax > 18% and avg    Cut to 15%: +5 approval for
+                      happiness < 60              2 days / refuse: -5
+  Cooling centers     Heatwave                    Open 150 cr: no heat health or
+                                                  mood loss / ignore: -3
+  Park request        40%+ of housed citizens     Promise a park within 3 days
+                      have no park nearby         (kept: +6, broken: -8) /
+                                                  decline: -3
+
+4.5 Milestones and city rank
+  Ranks: Settlement -> Town -> City -> Metropolis. Each milestone pays a
+  regional grant.
+
+  Milestone            Requirement                                     Reward
+  -------------------  ----------------------------------------------  ------
+  Groundbreaking       Construct your first new building                 200
+  Clean Energy         Build a Solar Array                               300
+  Town Charter         30 citizens (rank Town, unlocks School)           600
+  Full Employment      Unemployment < 5% with >= 25 citizens             400
+  Thriving Community   Average happiness >= 70 for 24 hours              500
+  Balanced Books       3 consecutive days with a budget surplus          500
+  Second Term          Win your first re-election                        300
+  Knowledge City       Open a School                                     300
+  City Charter         50 citizens (rank City)                          1200
+  Green City           3 parks and no home with polluted air             600
+  Metropolis           80 citizens (rank Metropolis)                    2500
+
+4.6 The Morning Circuit (daily newspaper)
+  Published every day at 06:00 from day 2 onward. It covers the biggest news
+  of the last 24 hours, key figures with their daily change, a citizen
+  spotlight and the weather forecast.
+
+4.7 Weather
+  Seeded weather fronts with a known next front, which drives the forecast.
+
+  Kind          Solar   Power demand   Mood   Outdoor   Duration (h)
+  -----------   -----   ------------   ----   -------   ------------
+  Clear         1.00    x1.0           +2     +0.1      6-14
+  Overcast      0.55    x1.0            0      0        4-10
+  Rain          0.35    x1.0           -2     -0.3      3-8
+  Thunderstorm  0.20    x1.0           -4     -0.7      2-5
+  Heatwave      1.00    x1.2           -5     -0.2      8-20
+  A heatwave also costs health unless cooling centers are open.
+
+
+--------------------------------------------------------------------------------
+5. BUILDINGS
+--------------------------------------------------------------------------------
+
+Building         Size  Cost   Power   Housing/Jobs        Notes
+---------------  ----  -----  ------  ------------------  ---------------------
+House            2x2    300   -2      4 residents         Rent 14/day
+Apartment Tower  2x2    850   -5      10 residents        Rent 11/day
+Office           2x2    900   -4      6 technical jobs    Outside contracts;
+                                       (Analyst)          closed weekends
+Fabricator       3x2   1200   -9      8 manual jobs       Makes goods for shops,
+                                                          exports surplus;
+                                                          pollutes (radius 7);
+                                                          closed weekends
+Shop             2x2    500   -2      2 social jobs       Meals, groceries,
+                                                          luxuries
+Market Hall      3x2    750   -2      2 social jobs       Prices 15% lower
+Fusion Plant     3x3   2200   +60     2 technical jobs    Upkeep 60/day; half
+                                                          output if unstaffed;
+                                                          mild pollution (r5)
+Solar Array      2x2    700   +14     none                +2 at night; affected
+                                                          by weather; upkeep 6
+Park             3x3    250   -0.5    none                Mood bonus (r10),
+                                                          cleans air; upkeep 8
+Clinic           2x2   1000   -3      2 medics            Heals; upkeep 40
+School           2x2    900   -3      2 teachers          Skill growth and
+                                                          raises nearby (r12);
+                                                          needs Town rank;
+                                                          upkeep 35
+City Hall        3x3    n/a   -3      2 civil servants    Not buildable; job
+                                                          center; protests
+                                                          gather here
+Road             1x1     10           upkeep 0.2/day      Citizens move 1 tile
+                                                          per tick on roads,
+                                                          1 per 3 off-road
+
+Demolition refunds 50% of cost. When power is short, buildings are served in
+priority order: plants and City Hall, then the clinic and school, homes,
+shops, offices, factories and finally parks. A plant with 6 or more hours of
+unpaid upkeep shuts down.
+
+
+--------------------------------------------------------------------------------
+6. SIMULATION MODEL
+--------------------------------------------------------------------------------
+
+6.1 Citizens
+  Each citizen has:
+    - Name, age, occupation, money, wage, food at home
+    - Traits (0-1): sociability, diligence, frugality, resilience
+    - Skills: technical, manual, social (these decide hiring and wages)
+    - Needs: energy, hunger, health, happiness
+    - Goals: saveMoney, findJob, makeFriends, stayHealthy
+    - Memories (up to 30) with emotional impact
+    - Relationships with other citizens (friendship scores)
+    - The last decision record: chosen action, reasons, runner-up scores
+    - Itemised happiness factors
+
+6.2 Decision making (decision.ts)
+  Each idle citizen scores every feasible (action, target) pair and commits
+  to the best one. Actions: work, rest, eat, shop, socialize, seekJob,
+  seekCare, protest, wait. Scores combine needs, personality, goals, money,
+  time of day, weekend, weather, travel time (penalty 0.004 per tick), friends
+  and a small random noise. Unreachable targets are never chosen. The
+  inspector shows why a citizen chose what it did.
+
+6.3 Activities (activities.ts)
+  State machine: idle -> traveling -> performing -> idle. Paths are re-planned
+  when the map changes. A trip longer than 240 ticks is abandoned. Citizens
+  standing on a newly built tile are moved out, so no one gets stuck.
+
+6.4 Needs and happiness (needs.ts)
+  Energy decays (faster at work). Hunger grows (more slowly while resting).
+  Starvation and exhaustion damage health. Health recovers naturally, and
+  quickly at a clinic. Pollution and heat damage health.
+  Happiness drifts toward an itemised target. Baseline 45, plus:
+    employed +6 / unemployed -6 to -20, homeless -20, no power at home -10,
+    hungry, exhausted, unwell, friends (up to +8), recent socialising (up
+    to +9), polluted air (up to -14), park nearby +6, school nearby +3, no
+    clinic nearby -3, long commute (up to -6), weather, weekend +3, festival,
+    nearly broke (-8), and others.
+
+6.5 Economy (economy.ts)
+  - Every transfer goes through transfer(), which refuses overdrafts. Only
+    the outside-world account may go negative.
+  - Wages are paid per worked tick. Income and sales tax go to the treasury.
+  - Residents pay daily rent and a utilities bill of 3 cr.
+  - Retail prices: meal 10, grocery 7, luxury 18. Wealthier citizens spend
+    more on luxuries.
+  - Supply chain: shops restock from the local Fabricator at a wholesale
+    price of 2.5, or import at 5.5. Factory surplus is exported at 2.2.
+  - Businesses pay operating costs and power fees. A business that stays
+    insolvent for 12 hours closes and lays off its staff. A subsidy (600 cr)
+    or bailout reopens it.
+  - Public buildings and roads cost daily upkeep from the treasury.
+  - Wages are reviewed daily. Schools raise skills, and with them wages.
+
+6.6 Power (power.ts)
+  Supply comes from plants, solar and imported power. Demand rises 20% in a
+  heatwave for homes and businesses, and energy conservation cuts it by 20%.
+  Shortages are distributed by priority. Unpowered homes hurt mood, and
+  unpowered businesses stop working.
+
+6.7 Environment (environment.ts)
+  Pollution from running factories (strength 1, radius 7) and the fusion
+  plant (0.5, radius 5). Parks clean the air (0.3, radius 5). Service
+  coverage radii: park 10, clinic 18, school 12. Commutes longer than 24
+  tiles lower mood.
+
+6.8 Population (population.ts)
+  Every 6 hours a newcomer arrives at the road on the map edge if there are
+  vacant homes, average happiness is at least 55, and there are open jobs or
+  at least 3 vacant homes. A citizen whose happiness stays below 15 for 12
+  hours emigrates.
+
+6.9 Events (events.ts)
+  Detected with hysteresis and streak counters. Each event lists its causes,
+  for example: power shortage and restoration, citizen complaints (hunger,
+  homelessness, blackouts, unpaid wages, no work, sickness without care),
+  protests and their dispersal, high or rising unemployment, goods shortage,
+  budget crisis, housing shortage, public health crisis, business closures
+  and reopenings, policy changes, milestones, elections and petitions.
+  The game can auto-pause on critical events (optional).
+
+6.10 Tick orchestration (engine.ts: stepWorld)
+  Every tick:   power update and events, need decay, activity steps, decisions
+                for idle citizens (sharing distance fields per tile), social
+                interactions, happiness drift.
+  Every hour:   weather, effect expiry, restocking, exports, business costs,
+                upkeep, solvency/closures, environmental health, school
+                learning (08-18), goals, happiness factors, emigration,
+                immigration (every 6 h), hourly events, petitions,
+                milestones, approval, stats sample, newspaper at 06:00.
+  Every day:    rent and benefits, daily stats reset, wage review,
+                surplus streak, unemployment trend, election check.
+
+
+--------------------------------------------------------------------------------
+7. CONTROLS
+--------------------------------------------------------------------------------
+
+  Left click             Inspect a citizen or building, or apply the
+                         current tool
+  Left drag              Pan (inspect tool), or paint roads / demolish
+                         (road and demolish tools)
+  Right/middle drag      Pan
+  Mouse wheel            Zoom
+  Space                  Pause / resume
+  1 - 4                  Speed 1x / 2x / 4x / 8x
+  V / R / B / Esc        Inspect / Road / Demolish / Cancel tool
+  O                      Cycle map view: normal, pollution, service coverage,
+                         happiness by home
+
+
+--------------------------------------------------------------------------------
+8. USER INTERFACE
+--------------------------------------------------------------------------------
+
+  Top bar     Approval (vs. needed), population, treasury (with daily
+              change), employment, happiness, energy supply/demand,
+              weather, day/clock, pause/speed buttons, Save/Load/New game
+  Toolbar     Inspect, Road, Demolish, and buildings grouped by category
+              (Housing, Commerce, Industry, Energy, Public) with costs and
+              lock reasons
+  Map         Phaser-rendered city with citizens, day/night lighting and
+              overlays
+  Sidebar     Tabs:
+                Inspect   - citizen (needs, decision reasons, memories,
+                            friends, goals) or building (staff, finances,
+                            power, subsidy/demolish)
+                Mayor     - approval breakdown, election countdown,
+                            petitions, milestones and rank
+                Citizens  - list of all citizens
+                Stats     - city statistics and history
+                Policies  - tax rates, benefit, energy conservation
+  Event log   Filterable by severity (All / Warnings / Critical), with
+              causes and links to the citizens and buildings involved.
+              Toggles for pause-on-critical and pause-on-petition.
+  Overlays    Petition cards, the daily newspaper card, toasts
+  Modals      New game (welcome), game over
+
+Policy limits: income tax 0-35% (default 15%), sales tax 0-20% (default 8%),
+unemployment benefit 0-40 cr/day (default 10), energy conservation on/off
+(default off).
+
+
+--------------------------------------------------------------------------------
+9. SAVING AND LOADING
+--------------------------------------------------------------------------------
+
+  - Saved to browser localStorage under the key "ai-city:save:slot1".
+  - Format: { format, version, savedAt, world }. The current version is 2.
+  - Version 1 saves are migrated automatically (MIGRATIONS in
+    persistence.ts).
+  - Loading validates the whole structure (ids, references, ranges,
+    capacities, overlaps, petitions, effects). If anything is invalid, the
+    running game is left untouched.
+  - "ai-city:intro-seen" remembers whether the welcome screen has been shown.
+
+
+--------------------------------------------------------------------------------
+10. PROJECT STRUCTURE
+--------------------------------------------------------------------------------
+
+AI_city/
+  index.html            HTML entry; loads fonts and /src/main.tsx
+  package.json          Scripts and dependencies
+  vite.config.ts        Vite + Vitest configuration
+  tsconfig.json         TypeScript configuration
+  README.md             Player and developer documentation
+  dist/                 Production build output (git-ignored)
+  src/
+    main.tsx            React root
+    sim/                Pure TypeScript simulation (no DOM, React or Phaser)
+      types.ts            World state and entity interfaces (plain JSON)
+      constants.ts        Balance values
+      rng.ts              Seeded mulberry32; RNG state stored in the world
+      clock.ts            Fixed-timestep clock (pause, speed, catch-up cap)
+      time.ts             Hour, day, weekend and night helpers
+      map.ts              Tiles, footprints, entrances, blocked grid
+      navigation.ts       Weighted Dijkstra (road 1 tick/tile, grass 3)
+      buildings.ts        Building catalogue and queries
+      construction.ts     Placement, roads, demolition (validated, atomic)
+      world.ts            Builds the starting city
+      needs.ts            Need decay and the happiness model
+      decision.ts         Utility-based action selection with reasons
+      activities.ts       idle -> traveling -> performing state machine
+      citizens.ts         Creation, goals, memories, relationships, hiring
+      economy.ts          Ledgered transfers, wages, retail, supply chain
+      power.ts            Generation and priority distribution
+      events.ts           Causal event detectors
+      population.ts       Immigration and emigration
+      policies.ts         Taxes, benefits, conservation, subsidies
+      weather.ts          Seeded weather fronts and forecast
+      environment.ts      Pollution, service coverage, commutes
+      approval.ts         Approval, difficulty, elections
+      milestones.ts       Objectives, grants, rank, unlocks
+      petitions.ts        Condition-triggered mayoral decisions
+      effects.ts          Timed effects (festival, imports, cooling,
+                          promises)
+      bulletin.ts         Daily newspaper
+      stats.ts            City statistics and history samples
+      engine.ts           One-tick orchestration
+      persistence.ts      Versioned, validated save format
+      index.ts            Public exports
+    game/
+      controller.ts       GameController: world, clock, tools, selection,
+                          commands, toasts, save/load, new game
+      CityScene.ts        Phaser scene rendering the map (read-only view
+                          of the world)
+      PhaserCity.tsx      React wrapper that mounts Phaser
+      palette.ts          Colours for categories, actions, map
+    ui/
+      App.tsx             Layout: top bar, toolbar, map, sidebar, event log
+      useGame.ts          React context/hook for the controller
+      format.ts           Number formatting
+      components/         TopBar, Toolbar, Inspector, MayorPanel,
+                          CitizensList, StatsPanel, PoliciesPanel, EventLog,
+                          Overlays (petitions, newspaper), Modals, common
+      styles/app.css      All styling (dark futuristic theme)
+  tests/                Vitest suites
+    clock.test.ts           Fixed-step clock behaviour
+    construction.test.ts    Placement, roads, demolition
+    determinism.test.ts     Same seed gives the same result
+    economy.test.ts         Money conservation, wages, retail, closures
+    events.test.ts          Causal event detection
+    living-world.test.ts    Weather, petitions, milestones, elections,
+                            environment
+    navigation.test.ts      Pathfinding
+    needs-decision.test.ts  Needs and utility decisions
+    persistence.test.ts     Save/load, validation, migration
+    power.test.ts           Supply, demand, priority distribution
+    simulation.test.ts      Long-run simulation sanity checks
+    helpers.ts              Shared test utilities
+
+
+--------------------------------------------------------------------------------
+11. ARCHITECTURE
+--------------------------------------------------------------------------------
+
+  [ React UI ]  <-- coarse updates (~200 ms) --  [ GameController ]
+       |                                           |  owns World + clock
+       +-- commands (build, policy, answer) -----> |
+                                                   |  frame(): converts real
+  [ Phaser CityScene ] <-- reads world each frame  |  time to ticks
+       +-- input forwarded to the controller ----> |
+                                                   v
+                                          stepWorld(world)  (src/sim)
+
+  - The simulation lives in src/sim. It is pure, deterministic and
+    serialisable to plain JSON, and it can be tested with no browser.
+  - The world advances only through stepWorld(world).
+  - The renderer never mutates the simulation. It forwards input to the
+    controller.
+  - Commands such as placement, demolition, policies and subsidies are
+    validated and atomic, and return { ok, reason }.
+
+
+--------------------------------------------------------------------------------
+12. CURRENT STATUS
+--------------------------------------------------------------------------------
+
+  - Runs locally with "npm run dev" at http://localhost:5173. The welcome
+    screen, city map, top-bar stats and event log load with no console
+    errors.
+  - Test suite: 11 files, 117 tests, all passing.
+  - Single commit on branch master.
+
+================================================================================
